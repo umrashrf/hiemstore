@@ -1,5 +1,6 @@
 import ast
 import os.path
+import warnings
 
 import dj_database_url
 import dj_email_url
@@ -66,6 +67,7 @@ LANGUAGES = [
     ("cs", _("Czech")),
     ("da", _("Danish")),
     ("de", _("German")),
+    ("el", _("Greek")),
     ("en", _("English")),
     ("es", _("Spanish")),
     ("es-co", _("Colombian Spanish")),
@@ -196,22 +198,22 @@ TEMPLATES = [
 SECRET_KEY = os.environ.get("SECRET_KEY")
 
 MIDDLEWARE = [
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
-    "saleor.core.middleware.django_session_middleware",
-    "saleor.core.middleware.django_security_middleware",
-    "saleor.core.middleware.django_csrf_view_middleware",
-    "saleor.core.middleware.django_auth_middleware",
-    "saleor.core.middleware.django_messages_middleware",
-    "saleor.core.middleware.django_locale_middleware",
-    "saleor.core.middleware.babel_locale_middleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.locale.LocaleMiddleware",
+    "django_babel.middleware.LocaleMiddleware",
     "saleor.core.middleware.discounts",
     "saleor.core.middleware.google_analytics",
     "saleor.core.middleware.country",
     "saleor.core.middleware.currency",
     "saleor.core.middleware.site",
-    "saleor.core.middleware.taxes",
-    "saleor.core.middleware.social_auth_exception_middleware",
-    "saleor.core.middleware.impersonate_middleware",
+    "saleor.core.middleware.extensions",
+    "social_django.middleware.SocialAuthExceptionMiddleware",
+    "impersonate.middleware.ImpersonateMiddleware",
     "saleor.graphql.middleware.jwt_middleware",
 ]
 
@@ -229,6 +231,7 @@ INSTALLED_APPS = [
     "django.contrib.postgres",
     "django.forms",
     # Local apps
+    "saleor.extensions",
     "saleor.account",
     "saleor.discount",
     "saleor.giftcard",
@@ -268,8 +271,19 @@ INSTALLED_APPS = [
 
 ENABLE_DEBUG_TOOLBAR = get_bool_from_env("ENABLE_DEBUG_TOOLBAR", False)
 if ENABLE_DEBUG_TOOLBAR:
-    MIDDLEWARE.append("debug_toolbar.middleware.DebugToolbarMiddleware")
-    INSTALLED_APPS.append("debug_toolbar")
+    # Ensure the debug toolbar is actually installed before adding it
+    try:
+        __import__("debug_toolbar")
+    except ImportError as exc:
+        msg = (
+            f"{exc} -- Install the missing dependencies by "
+            f"running `pip install -r requirements_dev.txt`"
+        )
+        warnings.warn(msg)
+    else:
+        MIDDLEWARE.append("debug_toolbar.middleware.DebugToolbarMiddleware")
+        INSTALLED_APPS.append("debug_toolbar")
+
     DEBUG_TOOLBAR_PANELS = [
         # adds a request history to the debug toolbar
         "ddt_request_history.panels.request_history.RequestHistoryPanel",
@@ -599,6 +613,7 @@ PAYMENT_GATEWAYS = {
         "module": "saleor.payment.gateways.dummy",
         "config": {
             "auto_capture": True,
+            "store_card": False,
             "connection_params": {},
             "template_path": "order/payment/dummy.html",
         },
@@ -606,7 +621,8 @@ PAYMENT_GATEWAYS = {
     BRAINTREE: {
         "module": "saleor.payment.gateways.braintree",
         "config": {
-            "auto_capture": True,
+            "auto_capture": get_bool_from_env("BRAINTREE_AUTO_CAPTURE", True),
+            "store_card": get_bool_from_env("BRAINTREE_STORE_CARD", False),
             "template_path": "order/payment/braintree.html",
             "connection_params": {
                 "sandbox_mode": get_bool_from_env("BRAINTREE_SANDBOX_MODE", True),
@@ -619,7 +635,8 @@ PAYMENT_GATEWAYS = {
     RAZORPAY: {
         "module": "saleor.payment.gateways.razorpay",
         "config": {
-            "auto_capture": None,
+            "store_card": get_bool_from_env("RAZORPAY_STORE_CARD", False),
+            "auto_capture": get_bool_from_env("RAZORPAY_AUTO_CAPTURE", None),
             "template_path": "order/payment/razorpay.html",
             "connection_params": {
                 "public_key": os.environ.get("RAZORPAY_PUBLIC_KEY"),
@@ -633,7 +650,8 @@ PAYMENT_GATEWAYS = {
     STRIPE: {
         "module": "saleor.payment.gateways.stripe",
         "config": {
-            "auto_capture": True,
+            "store_card": get_bool_from_env("STRIPE_STORE_CARD", False),
+            "auto_capture": get_bool_from_env("STRIPE_AUTO_CAPTURE", True),
             "template_path": "order/payment/stripe.html",
             "connection_params": {
                 "public_key": os.environ.get("STRIPE_PUBLIC_KEY"),
@@ -658,3 +676,12 @@ GRAPHENE = {
     "RELAY_CONNECTION_ENFORCE_FIRST_OR_LAST": True,
     "RELAY_CONNECTION_MAX_LIMIT": 100,
 }
+
+EXTENSIONS_MANAGER = "saleor.extensions.manager.ExtensionsManager"
+
+PLUGINS = os.environ.get("PLUGINS", [])
+
+# Whether DraftJS should be used be used instead of HTML
+# True to use DraftJS (JSON based), for the 2.0 dashboard
+# False to use the old editor from dashboard 1.0
+USE_JSON_CONTENT = get_bool_from_env("USE_JSON_CONTENT", False)

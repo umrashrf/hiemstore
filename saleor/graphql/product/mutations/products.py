@@ -6,8 +6,6 @@ from django.db import transaction
 from django.template.defaultfilters import slugify
 from graphene.types import InputObjectType
 
-from ....core.taxes import interface as tax_interface
-from ....core.taxes.vatlayer import interface as vatlayer_interface
 from ....product import models
 from ....product.tasks import update_variants_names
 from ....product.thumbnails import (
@@ -17,7 +15,13 @@ from ....product.thumbnails import (
 )
 from ....product.utils.attributes import get_name_from_attributes
 from ...core.enums import TaxRateType
-from ...core.mutations import BaseMutation, ModelDeleteMutation, ModelMutation
+from ...core.mutations import (
+    BaseMutation,
+    ClearMetaBaseMutation,
+    ModelDeleteMutation,
+    ModelMutation,
+    UpdateMetaBaseMutation,
+)
 from ...core.scalars import Decimal, WeightScalar
 from ...core.types import SeoInput, Upload
 from ...core.utils import (
@@ -104,12 +108,6 @@ class CategoryUpdate(CategoryCreate):
         description = "Updates a category."
         model = models.Category
         permissions = ("product.manage_products",)
-
-    @classmethod
-    def save(cls, info, instance, cleaned_input):
-        if cleaned_input.get("background_image"):
-            create_category_background_image_thumbnails.delay(instance.pk)
-        instance.save()
 
 
 class CategoryDelete(ModelDeleteMutation):
@@ -330,6 +328,70 @@ class CollectionRemoveProducts(BaseMutation):
         return CollectionRemoveProducts(collection=collection)
 
 
+class CollectionUpdateMeta(UpdateMetaBaseMutation):
+    class Meta:
+        model = models.Collection
+        description = "Update public metadata for Collection"
+        permissions = ("product.manage_products",)
+        public = True
+
+
+class CollectionClearMeta(ClearMetaBaseMutation):
+    class Meta:
+        model = models.Collection
+        description = "Clears public metadata item for Collection"
+        permissions = ("product.manage_products",)
+        public = True
+
+
+class CollectionUpdatePrivateMeta(UpdateMetaBaseMutation):
+    class Meta:
+        model = models.Collection
+        description = "Update public metadata for Collection"
+        permissions = ("product.manage_products",)
+        public = False
+
+
+class CollectionClearPrivateMeta(ClearMetaBaseMutation):
+    class Meta:
+        model = models.Collection
+        description = "Clears public metadata item for Collection"
+        permissions = ("product.manage_products",)
+        public = False
+
+
+class CategoryUpdateMeta(UpdateMetaBaseMutation):
+    class Meta:
+        model = models.Category
+        description = "Update public metadata for category"
+        permissions = ("product.manage_products",)
+        public = True
+
+
+class CategoryClearMeta(ClearMetaBaseMutation):
+    class Meta:
+        model = models.Category
+        description = "Clears public metadata item for category"
+        permissions = ("product.manage_products",)
+        public = True
+
+
+class CategoryUpdatePrivateMeta(UpdateMetaBaseMutation):
+    class Meta:
+        model = models.Category
+        description = "Update public metadata for category"
+        permissions = ("product.manage_products",)
+        public = False
+
+
+class CategoryClearPrivateMeta(ClearMetaBaseMutation):
+    class Meta:
+        model = models.Category
+        description = "Clears public metadata item for category"
+        permissions = ("product.manage_products",)
+        public = False
+
+
 class AttributeValueInput(InputObjectType):
     slug = graphene.String(required=True, description="Slug of an attribute.")
     value = graphene.String(required=True, description="Value of an attribute.")
@@ -425,11 +487,11 @@ class ProductCreate(ModelMutation):
         # FIXME  tax_rate logic should be dropped after we remove tax_rate from input
         tax_rate = cleaned_input.pop("tax_rate", "")
         if tax_rate:
-            vatlayer_interface.assign_tax_to_object_meta(instance, tax_rate)
+            info.context.extensions.assign_tax_code_to_object_meta(instance, tax_rate)
 
         tax_code = cleaned_input.pop("tax_code", "")
         if tax_code:
-            tax_interface.assign_tax_to_object_meta(instance, tax_code)
+            info.context.extensions.assign_tax_code_to_object_meta(instance, tax_code)
 
         if attributes and product_type:
             qs = product_type.product_attributes.prefetch_related("values")
@@ -534,6 +596,38 @@ class ProductDelete(ModelDeleteMutation):
         description = "Deletes a product."
         model = models.Product
         permissions = ("product.manage_products",)
+
+
+class ProductUpdateMeta(UpdateMetaBaseMutation):
+    class Meta:
+        model = models.Product
+        description = "Update public metadata for product"
+        permissions = ("product.manage_products",)
+        public = True
+
+
+class ProductClearMeta(ClearMetaBaseMutation):
+    class Meta:
+        description = "Clears public metadata item for product"
+        model = models.Product
+        permissions = ("product.manage_products",)
+        public = True
+
+
+class ProductUpdatePrivateMeta(UpdateMetaBaseMutation):
+    class Meta:
+        description = "Update public metadata for product"
+        model = models.Product
+        permissions = ("product.manage_products",)
+        public = False
+
+
+class ProductClearPrivateMeta(ClearMetaBaseMutation):
+    class Meta:
+        description = "Clears public metadata item for product"
+        model = models.Product
+        permissions = ("product.manage_products",)
+        public = False
 
 
 class ProductVariantInput(graphene.InputObjectType):
@@ -650,6 +744,38 @@ class ProductVariantDelete(ModelDeleteMutation):
         permissions = ("product.manage_products",)
 
 
+class ProductVariantUpdateMeta(UpdateMetaBaseMutation):
+    class Meta:
+        model = models.ProductVariant
+        description = "Update public metadata for product variant"
+        permissions = ("product.manage_products",)
+        public = True
+
+
+class ProductVariantClearMeta(ClearMetaBaseMutation):
+    class Meta:
+        model = models.ProductVariant
+        description = "Clears public metadata item for product variant"
+        permissions = ("product.manage_products",)
+        public = True
+
+
+class ProductVariantUpdatePrivateMeta(UpdateMetaBaseMutation):
+    class Meta:
+        model = models.ProductVariant
+        description = "Update public metadata for product variant"
+        permissions = ("product.manage_products",)
+        public = False
+
+
+class ProductVariantClearPrivateMeta(ClearMetaBaseMutation):
+    class Meta:
+        model = models.ProductVariant
+        description = "Clears public metadata item for product variant"
+        permissions = ("product.manage_products",)
+        public = False
+
+
 class ProductTypeInput(graphene.InputObjectType):
     name = graphene.String(description="Name of the product type.")
     has_variants = graphene.Boolean(
@@ -702,11 +828,17 @@ class ProductTypeCreate(ModelMutation):
         # FIXME  tax_rate logic should be dropped after we remove tax_rate from input
         tax_rate = cleaned_input.pop("tax_rate", "")
         if tax_rate:
-            vatlayer_interface.assign_tax_to_object_meta(instance, tax_rate)
+            if "taxes" not in instance.meta:
+                instance.meta["taxes"] = {}
+            instance.meta["taxes"]["vatlayer"] = {
+                "code": tax_rate,
+                "description": tax_rate,
+            }
+            info.context.extensions.assign_tax_code_to_object_meta(instance, tax_rate)
 
         tax_code = cleaned_input.pop("tax_code", "")
         if tax_code:
-            tax_interface.assign_tax_to_object_meta(instance, tax_code)
+            info.context.extensions.assign_tax_code_to_object_meta(instance, tax_code)
 
         return cleaned_input
 
@@ -749,6 +881,38 @@ class ProductTypeDelete(ModelDeleteMutation):
         description = "Deletes a product type."
         model = models.ProductType
         permissions = ("product.manage_products",)
+
+
+class ProductTypeUpdateMeta(UpdateMetaBaseMutation):
+    class Meta:
+        model = models.ProductType
+        description = "Update public metadata for product type"
+        permissions = ("product.manage_products",)
+        public = True
+
+
+class ProductTypeClearMeta(ClearMetaBaseMutation):
+    class Meta:
+        description = "Clears public metadata item for product type"
+        model = models.ProductType
+        permissions = ("product.manage_products",)
+        public = True
+
+
+class ProductTypeUpdatePrivateMeta(UpdateMetaBaseMutation):
+    class Meta:
+        description = "Update public metadata for product type"
+        model = models.ProductType
+        permissions = ("product.manage_products",)
+        public = False
+
+
+class ProductTypeClearPrivateMeta(ClearMetaBaseMutation):
+    class Meta:
+        description = "Clears public metadata item for product type"
+        model = models.ProductType
+        permissions = ("product.manage_products",)
+        public = False
 
 
 class ProductImageCreateInput(graphene.InputObjectType):

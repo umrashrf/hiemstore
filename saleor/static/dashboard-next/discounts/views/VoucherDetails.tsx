@@ -25,6 +25,7 @@ import { decimal, getMutationState, joinDateTime, maybe } from "../../misc";
 import { productUrl } from "../../products/urls";
 import {
   DiscountValueTypeEnum,
+  RequirementsPickerEnum,
   VoucherTypeEnum
 } from "../../types/globalTypes";
 import DiscountCountrySelectDialog from "../components/DiscountCountrySelectDialog";
@@ -315,6 +316,8 @@ export const VoucherDetails: React.StatelessComponent<VoucherDetailsProps> = ({
                                   variables: {
                                     id,
                                     input: {
+                                      applyOncePerCustomer:
+                                        formData.applyOncePerCustomer,
                                       applyOncePerOrder:
                                         formData.applyOncePerOrder,
                                       discountValue:
@@ -327,11 +330,24 @@ export const VoucherDetails: React.StatelessComponent<VoucherDetailsProps> = ({
                                         "SHIPPING"
                                           ? DiscountValueTypeEnum.PERCENTAGE
                                           : formData.discountType,
-                                      endDate: joinDateTime(
-                                        formData.endDate,
-                                        formData.endTime
-                                      ),
-                                      minAmountSpent: formData.minAmountSpent,
+                                      endDate: formData.hasEndDate
+                                        ? joinDateTime(
+                                            formData.endDate,
+                                            formData.endTime
+                                          )
+                                        : null,
+                                      minAmountSpent:
+                                        formData.requirementsPicker !==
+                                        RequirementsPickerEnum.ORDER
+                                          ? 0
+                                          : parseFloat(formData.minAmountSpent),
+                                      minCheckoutItemsQuantity:
+                                        formData.requirementsPicker !==
+                                        RequirementsPickerEnum.ITEM
+                                          ? 0
+                                          : parseFloat(
+                                              formData.minCheckoutItemsQuantity
+                                            ),
                                       startDate: joinDateTime(
                                         formData.startDate,
                                         formData.startTime
@@ -341,7 +357,10 @@ export const VoucherDetails: React.StatelessComponent<VoucherDetailsProps> = ({
                                         "SHIPPING"
                                           ? VoucherTypeEnum.SHIPPING
                                           : formData.type,
-                                      usageLimit: formData.usageLimit
+                                      usageLimit: parseInt(
+                                        formData.usageLimit,
+                                        10
+                                      )
                                     }
                                   }
                                 })
@@ -407,13 +426,13 @@ export const VoucherDetails: React.StatelessComponent<VoucherDetailsProps> = ({
                                   onFetch={searchCategories}
                                   loading={searchCategoriesOpts.loading}
                                   onClose={closeModal}
-                                  onSubmit={formData =>
+                                  onSubmit={categories =>
                                     voucherCataloguesAdd({
                                       variables: {
                                         ...paginationState,
                                         id,
                                         input: {
-                                          categories: formData.categories.map(
+                                          categories: categories.map(
                                             product => product.id
                                           )
                                         }
@@ -444,13 +463,13 @@ export const VoucherDetails: React.StatelessComponent<VoucherDetailsProps> = ({
                                   onFetch={searchCollections}
                                   loading={searchCollectionsOpts.loading}
                                   onClose={closeModal}
-                                  onSubmit={formData =>
+                                  onSubmit={collections =>
                                     voucherCataloguesAdd({
                                       variables: {
                                         ...paginationState,
                                         id,
                                         input: {
-                                          collections: formData.collections.map(
+                                          collections: collections.map(
                                             product => product.id
                                           )
                                         }
@@ -496,13 +515,13 @@ export const VoucherDetails: React.StatelessComponent<VoucherDetailsProps> = ({
                                   onFetch={searchProducts}
                                   loading={searchProductsOpts.loading}
                                   onClose={closeModal}
-                                  onSubmit={formData =>
+                                  onSubmit={products =>
                                     voucherCataloguesAdd({
                                       variables: {
                                         ...paginationState,
                                         id,
                                         input: {
-                                          products: formData.products.map(
+                                          products: products.map(
                                             product => product.id
                                           )
                                         }

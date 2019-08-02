@@ -20,11 +20,11 @@ from saleor.account.models import Address, User
 from saleor.checkout import utils
 from saleor.checkout.models import Checkout
 from saleor.checkout.utils import add_variant_to_checkout
-from saleor.dashboard.menu.utils import update_menu
 from saleor.discount import DiscountInfo, DiscountValueType, VoucherType
-from saleor.discount.models import Sale, Voucher, VoucherTranslation
+from saleor.discount.models import Sale, Voucher, VoucherCustomer, VoucherTranslation
 from saleor.giftcard.models import GiftCard
 from saleor.menu.models import Menu, MenuItem
+from saleor.menu.utils import update_menu
 from saleor.order import OrderStatus
 from saleor.order.events import OrderEvents
 from saleor.order.models import FulfillmentStatus, Order, OrderEvent
@@ -668,19 +668,19 @@ def voucher(db):  # pylint: disable=W0613
 
 
 @pytest.fixture
-def voucher_specific_product_type(db):
-    return Voucher.objects.create(
-        code="mirumee", discount_value=10, type=VoucherType.SPECIFIC_PRODUCT
-    )
-
-
-@pytest.fixture
 def voucher_percentage(db):
     return Voucher.objects.create(
         code="mirumee",
         discount_value=10,
         discount_value_type=DiscountValueType.PERCENTAGE,
     )
+
+
+@pytest.fixture
+def voucher_specific_product_type(voucher_percentage):
+    voucher_percentage.type = VoucherType.SPECIFIC_PRODUCT
+    voucher_percentage.save()
+    return voucher_percentage
 
 
 @pytest.fixture
@@ -695,6 +695,12 @@ def voucher_shipping_type():
     return Voucher.objects.create(
         code="mirumee", discount_value=10, type=VoucherType.SHIPPING, countries="IS"
     )
+
+
+@pytest.fixture
+def voucher_customer(voucher, customer_user):
+    email = customer_user.email
+    return VoucherCustomer.objects.create(voucher=voucher, customer_email=email)
 
 
 @pytest.fixture()
@@ -1105,7 +1111,9 @@ def menu(db):
 
 @pytest.fixture
 def menu_item(menu):
-    return MenuItem.objects.create(menu=menu, name="Link 1", url="http://example.com/")
+    item = MenuItem.objects.create(menu=menu, name="Link 1", url="http://example.com/")
+    update_menu(menu)
+    return item
 
 
 @pytest.fixture
@@ -1113,6 +1121,7 @@ def menu_item_list(menu):
     menu_item_1 = MenuItem.objects.create(menu=menu, name="Link 1")
     menu_item_2 = MenuItem.objects.create(menu=menu, name="Link 2")
     menu_item_3 = MenuItem.objects.create(menu=menu, name="Link 3")
+    update_menu(menu)
     return menu_item_1, menu_item_2, menu_item_3
 
 
@@ -1226,3 +1235,138 @@ def digital_content_url(digital_content, order_line):
 @pytest.fixture
 def media_root(tmpdir, settings):
     settings.MEDIA_ROOT = str(tmpdir.mkdir("media"))
+
+
+@pytest.fixture
+def description_json():
+    return {
+        "blocks": [
+            {
+                "key": "",
+                "data": {},
+                "text": "E-commerce for the PWA era",
+                "type": "header-two",
+                "depth": 0,
+                "entityRanges": [],
+                "inlineStyleRanges": [],
+            },
+            {
+                "key": "",
+                "data": {},
+                "text": (
+                    "A modular, high performance e-commerce storefront "
+                    "built with GraphQL, Django, and ReactJS."
+                ),
+                "type": "unstyled",
+                "depth": 0,
+                "entityRanges": [],
+                "inlineStyleRanges": [],
+            },
+            {
+                "key": "",
+                "data": {},
+                "text": "",
+                "type": "unstyled",
+                "depth": 0,
+                "entityRanges": [],
+                "inlineStyleRanges": [],
+            },
+            {
+                "key": "",
+                "data": {},
+                "text": (
+                    "Saleor is a rapidly-growing open source e-commerce platform "
+                    "that has served high-volume companies from branches "
+                    "like publishing and apparel since 2012. Based on Python "
+                    "and Django, the latest major update introduces a modular "
+                    "front end with a GraphQL API and storefront and dashboard "
+                    "written in React to make Saleor a full-functionality "
+                    "open source e-commerce."
+                ),
+                "type": "unstyled",
+                "depth": 0,
+                "entityRanges": [],
+                "inlineStyleRanges": [],
+            },
+            {
+                "key": "",
+                "data": {},
+                "text": "",
+                "type": "unstyled",
+                "depth": 0,
+                "entityRanges": [],
+                "inlineStyleRanges": [],
+            },
+            {
+                "key": "",
+                "data": {},
+                "text": "Get Saleor today!",
+                "type": "unstyled",
+                "depth": 0,
+                "entityRanges": [{"key": 0, "length": 17, "offset": 0}],
+                "inlineStyleRanges": [],
+            },
+        ],
+        "entityMap": {
+            "0": {
+                "data": {"href": "https://github.com/mirumee/saleor"},
+                "type": "LINK",
+                "mutability": "MUTABLE",
+            }
+        },
+    }
+
+
+@pytest.fixture
+def description_raw():
+    return """\
+E-commerce for the PWA era
+A modular, high performance e-commerce storefront built with GraphQL, Django, \
+and ReactJS.
+
+Saleor is a rapidly-growing open source e-commerce platform that has served \
+high-volume companies from branches like publishing and apparel since 2012. \
+Based on Python and Django, the latest major update introduces a modular \
+front end with a GraphQL API and storefront and dashboard written in React \
+to make Saleor a full-functionality open source e-commerce.
+
+Get Saleor today!"""
+
+
+@pytest.fixture
+def other_description_json():
+    return {
+        "blocks": [
+            {
+                "key": "",
+                "data": {},
+                "text": "A GRAPHQL-FIRST ECOMMERCE PLATFORM FOR PERFECTIONISTS",
+                "type": "header-two",
+                "depth": 0,
+                "entityRanges": [],
+                "inlineStyleRanges": [],
+            },
+            {
+                "key": "",
+                "data": {},
+                "text": (
+                    "Saleor is powered by a GraphQL server running on "
+                    "top of Python 3 and a Django 2 framework."
+                ),
+                "type": "unstyled",
+                "depth": 0,
+                "entityRanges": [],
+                "inlineStyleRanges": [],
+            },
+        ],
+        "entityMap": {},
+    }
+
+
+@pytest.fixture
+def other_description_raw():
+    return (
+        "A GRAPHQL-FIRST ECOMMERCE PLATFORM FOR PERFECTIONISTS\n"
+        "Saleor is powered by a GraphQL server running on top of Python 3 "
+        "and a Django 2 framework."
+    )

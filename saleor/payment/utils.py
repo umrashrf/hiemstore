@@ -2,7 +2,7 @@ import json
 import logging
 from decimal import Decimal
 from functools import wraps
-from typing import Dict
+from typing import Dict, List
 
 from django.conf import settings
 from django.core.serializers.json import DjangoJSONEncoder
@@ -24,7 +24,7 @@ from . import (
     TransactionKind,
     get_payment_gateway,
 )
-from .interface import AddressData, GatewayResponse, PaymentData
+from .interface import AddressData, GatewayResponse, PaymentData, TokenConfig
 from .models import Payment, Transaction
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,11 @@ REQUIRED_GATEWAY_KEYS = {
     "currency",
 }
 ALLOWED_GATEWAY_KINDS = {choices[0] for choices in TransactionKind.CHOICES}
+GATEWAYS_META_NAMESPACE = "payment-gateways"
+
+
+def list_enabled_gateways() -> List[str]:
+    return list(settings.CHECKOUT_PAYMENT_GATEWAYS.keys())
 
 
 def get_gateway_operation_func(gateway, operation_type):
@@ -61,8 +66,10 @@ def create_payment_information(
     amount: Decimal = None,
     billing_address: AddressData = None,
     shipping_address: AddressData = None,
+    customer_id: str = None,
+    store_source: bool = False,
 ) -> PaymentData:
-    """Extracts order information along with payment details.
+    """Extract order information along with payment details.
 
     Returns information required to process payment and additional
     billing/shipping addresses for optional fraud-prevention mechanisms.
@@ -81,18 +88,20 @@ def create_payment_information(
         token=payment_token,
         amount=amount or payment.total,
         currency=payment.currency,
-        billing=billing,
-        shipping=shipping,
+        billing=billing or billing_address,
+        shipping=shipping or shipping_address,
         order_id=order_id,
         customer_ip_address=payment.customer_ip_address,
+        customer_id=customer_id,
         customer_email=payment.billing_email,
+        reuse_source=store_source,
     )
 
 
 def handle_fully_paid_order(order):
     events.order_fully_paid_event(order=order)
 
-    if order.get_user_current_email():
+    if order.get_customer_email():
         events.email_sent_event(
             order=order, user=None, email_type=events.OrderEventsEmails.PAYMENT
         )
@@ -205,7 +214,6 @@ def create_transaction(
     error_msg=None,
 ) -> Transaction:
     """Create a transaction based on transaction kind and gateway response."""
-
     # Default values for token, amount, currency are only used in cases where
     # response from gateway was invalid or an exception occured
     if not gateway_response:
@@ -227,17 +235,22 @@ def create_transaction(
         amount=gateway_response.amount,
         currency=gateway_response.currency,
         error=gateway_response.error,
+        customer_id=gateway_response.customer_id,
         gateway_response=gateway_response.raw_response or {},
     )
     return txn
 
 
-def gateway_get_client_token(gateway_name: str):
-    """Gets client token, that will be used as a customer's identificator for
-    client-side tokenization of the chosen payment method.
+def gateway_get_client_token(gateway_name: str, token_config: TokenConfig = None):
+    """Get a client token.
+
+    That will be used as a customer's identificator for client-side tokenization
+    of the chosen payment method.
     """
+    if not token_config:
+        token_config = TokenConfig()
     gateway, gateway_config = get_payment_gateway(gateway_name)
-    return gateway.get_client_token(config=gateway_config)
+    return gateway.get_client_token(config=gateway_config, token_config=token_config)
 
 
 def clean_capture(payment: Payment, amount: Decimal):
@@ -268,16 +281,18 @@ def clean_mark_order_as_paid(order: Order):
 
 
 def call_gateway(operation_type, payment, payment_token, **extra_params):
-    """Helper that calls the passed gateway function and handles exceptions.
+    """Call the passed gateway function and handle exceptions.
 
     Additionally does validation of the returned gateway response.
     """
     gateway, gateway_config = get_payment_gateway(payment.gateway)
     gateway_response = None
     error_msg = None
-
+    store_source = (
+        extra_params.pop("store_source", False) and gateway_config.store_customer
+    )
     payment_information = create_payment_information(
-        payment, payment_token, **extra_params
+        payment, payment_token, store_source=store_source, **extra_params
     )
 
     try:
@@ -332,8 +347,7 @@ def call_gateway(operation_type, payment, payment_token, **extra_params):
 
 
 def validate_gateway_response(response: GatewayResponse):
-    """Validates response to be a correct format for Saleor to process."""
-
+    """Validate response to be a correct format for Saleor to process."""
     if not isinstance(response, GatewayResponse):
         raise GatewayError("Gateway needs to return a GatewayResponse obj")
 
@@ -390,7 +404,7 @@ def _gateway_postprocess(transaction, payment):
 def gateway_process_payment(
     payment: Payment, payment_token: str, **extras
 ) -> Transaction:
-    """Performs whole payment process on a gateway."""
+    """Perform the whole payment process on a gateway."""
     transaction = call_gateway(
         operation_type=OperationType.PROCESS_PAYMENT,
         payment=payment,
@@ -405,10 +419,12 @@ def gateway_process_payment(
 
 @require_active_payment
 def gateway_authorize(payment: Payment, payment_token: str) -> Transaction:
-    """Authorizes the payment and creates relevant transaction.
+    """Authorize the payment and create a relevant transaction.
 
     Args:
-     - payment_token: One-time-use reference to payment information.
+         payment: the payment to process.
+         payment_token: One-time-use reference to payment information.
+
     """
     clean_authorize(payment)
 
@@ -419,7 +435,7 @@ def gateway_authorize(payment: Payment, payment_token: str) -> Transaction:
 
 @require_active_payment
 def gateway_capture(payment: Payment, amount: Decimal = None) -> Transaction:
-    """Captures the money that was reserved during the authorization stage."""
+    """Capture the money that was reserved during the authorization stage."""
     if amount is None:
         amount = payment.get_charge_amount()
     clean_capture(payment, amount)
@@ -464,7 +480,8 @@ def gateway_void(payment) -> Transaction:
 
 @require_active_payment
 def gateway_refund(payment, amount: Decimal = None) -> Transaction:
-    """Refunds the charged funds back to the customer.
+    """Refund the charged funds back to the customer.
+
     Refunds can be total or partial.
     """
     if amount is None:
@@ -495,3 +512,32 @@ def gateway_refund(payment, amount: Decimal = None) -> Transaction:
 
     _gateway_postprocess(transaction, payment)
     return transaction
+
+
+def fetch_customer_id(user, gateway):
+    """Retrieve users customer_id stored for desired gateway."""
+    key = prepare_namespace_name(gateway)
+    gateway_config = user.get_private_meta(
+        namespace=GATEWAYS_META_NAMESPACE, client=key
+    )
+    return gateway_config.get("customer_id", None)
+
+
+def store_customer_id(user, gateway, customer_id):
+    """Store customer_id in users private meta for desired gateway."""
+    user.store_private_meta(
+        namespace=GATEWAYS_META_NAMESPACE,
+        client=prepare_namespace_name(gateway),
+        item={"customer_id": customer_id},
+    )
+    user.save(update_fields=["private_meta"])
+
+
+def prepare_namespace_name(s):
+    return s.strip().upper()
+
+
+def retrieve_customer_sources(gateway_name, customer_id):
+    """Fetch all customer payment sources stored in gateway."""
+    gateway, config = get_payment_gateway(gateway_name)
+    return gateway.list_client_sources(config, customer_id)

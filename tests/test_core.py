@@ -6,7 +6,7 @@ from urllib.parse import urljoin
 import pytest
 from django.shortcuts import reverse
 from django.templatetags.static import static
-from django.test import override_settings
+from django.test import Client, override_settings
 from django.urls import translate_url
 from measurement.measures import Weight
 from prices import Money
@@ -20,6 +20,7 @@ from saleor.core.utils import (
     create_thumbnails,
     format_money,
     get_country_by_ip,
+    get_country_name_by_code,
     get_currency_for_country,
     random_data,
 )
@@ -292,3 +293,15 @@ def test_delete_sort_order_with_null_value(menu_item):
     menu_item.sort_order = None
     menu_item.save(update_fields=["sort_order"])
     menu_item.delete()
+
+
+def test_csrf_middleware_is_enabled():
+    csrf_client = Client(enforce_csrf_checks=True)
+    checkout_url = reverse("checkout:index")
+    response = csrf_client.post(checkout_url)
+    assert response.status_code == 403
+
+
+def test_get_country_name_by_code():
+    country_name = get_country_name_by_code("PL")
+    assert country_name == "Poland"

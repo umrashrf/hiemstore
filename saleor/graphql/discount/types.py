@@ -110,12 +110,14 @@ class Voucher(CountableDjangoObjectType):
         providing valid voucher codes."""
         only_fields = [
             "apply_once_per_order",
+            "apply_once_per_customer",
             "code",
             "discount_value",
             "discount_value_type",
             "end_date",
             "id",
             "min_amount_spent",
+            "min_checkout_items_quantity",
             "name",
             "start_date",
             "type",

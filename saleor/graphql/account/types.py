@@ -2,7 +2,7 @@ import graphene
 import graphene_django_optimizer as gql_optimizer
 from django.contrib.auth import get_user_model
 from graphene import relay
-from graphql_jwt.decorators import permission_required
+from graphql_jwt.decorators import login_required, permission_required
 
 from ...account import models
 from ...checkout.utils import get_user_checkout
@@ -11,7 +11,8 @@ from ...order import models as order_models
 from ..checkout.types import Checkout
 from ..core.connection import CountableDjangoObjectType
 from ..core.fields import PrefetchingConnectionField
-from ..core.types import CountryDisplay, Image, PermissionDisplay
+from ..core.resolvers import resolve_meta, resolve_private_meta
+from ..core.types import CountryDisplay, Image, MetadataObjectType, PermissionDisplay
 from ..core.utils import get_node_optimized
 from ..utils import format_permissions_for_display
 from .enums import CustomerEventsEnum
@@ -67,7 +68,8 @@ class Address(CountableDjangoObjectType):
 
     @staticmethod
     def resolve_is_default_shipping_address(root: models.Address, _info):
-        """
+        """Look if the address is the default shipping address of the user.
+
         This field is added through annotation when using the
         `resolve_addresses` resolver. It's invalid for
         `resolve_default_shipping_address` and
@@ -85,7 +87,8 @@ class Address(CountableDjangoObjectType):
 
     @staticmethod
     def resolve_is_default_billing_address(root: models.Address, _info):
-        """
+        """Look if the address is the default billing address of the user.
+
         This field is added through annotation when using the
         `resolve_addresses` resolver. It's invalid for
         `resolve_default_shipping_address` and
@@ -150,7 +153,7 @@ class CustomerEvent(CountableDjangoObjectType):
         return None
 
 
-class User(CountableDjangoObjectType):
+class User(MetadataObjectType, CountableDjangoObjectType):
     addresses = gql_optimizer.field(
         graphene.List(Address, description="List of all user's addresses."),
         model_field="addresses",
@@ -182,6 +185,10 @@ class User(CountableDjangoObjectType):
         ),
         model_field="events",
     )
+    stored_payment_sources = graphene.List(
+        "saleor.graphql.payment.types.PaymentSource",
+        description="List of stored payment sources",
+    )
 
     class Meta:
         description = "Represents user data."
@@ -208,7 +215,7 @@ class User(CountableDjangoObjectType):
 
     @staticmethod
     def resolve_checkout(root: models.User, _info, **_kwargs):
-        return get_user_checkout(root)
+        return get_user_checkout(root)[0]
 
     @staticmethod
     def resolve_gift_cards(root: models.User, info, **_kwargs):
@@ -251,6 +258,22 @@ class User(CountableDjangoObjectType):
                 rendition_key_set="user_avatars",
                 info=info,
             )
+
+    @staticmethod
+    @login_required
+    def resolve_stored_payment_sources(root: models.User, _info):
+        from .resolvers import resolve_payment_sources
+
+        return resolve_payment_sources(root)
+
+    @staticmethod
+    @permission_required("account.manage_users")
+    def resolve_private_meta(root, _info):
+        return resolve_private_meta(root, _info)
+
+    @staticmethod
+    def resolve_meta(root, _info):
+        return resolve_meta(root, _info)
 
 
 class ChoiceValue(graphene.ObjectType):
